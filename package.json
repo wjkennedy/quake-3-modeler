@@ -60,7 +60,7 @@
     "recharts": "2.15.0",
     "sonner": "^1.7.1",
     "tailwind-merge": "^3.3.1",
-    "three": "^r163",
+    "three": "^0.160.0",
     "vaul": "^1.1.2",
     "zod": "^3.24.1"
   },
@@ -70,7 +70,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/three": "^r163",
+    "@types/three": "^0.160.0",
     "esbuild": "^0.24.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
