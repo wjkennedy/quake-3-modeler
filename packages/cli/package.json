@@ -1,0 +1,21 @@
+{
+  "name": "@q3gen/cli",
+  "version": "1.0.0",
+  "bin": {
+    "q3gen": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@q3gen/core": "workspace:*",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "5.7.3"
+  }
+}
