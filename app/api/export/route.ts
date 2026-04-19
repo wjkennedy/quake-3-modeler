@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateModel, MD3Exporter, MD5Exporter, glTFExporter } from '@q3gen/core';
+import { validateModel, MD3Exporter, MD5Exporter, glTFExporter } from '@/lib/q3gen';
 
 export async function POST(request: NextRequest) {
   try {

@@ -2,16 +2,11 @@
   "name": "quake3-model-generator",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "packages/*",
-    "."
-  ],
   "scripts": {
     "dev": "next dev",
-    "build": "next build && pnpm -r build",
+    "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
-    "build:cli": "node scripts/build-cli.js"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

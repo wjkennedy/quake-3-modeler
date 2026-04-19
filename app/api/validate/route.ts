@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateModel, ValidationError } from '@q3gen/core';
+import { validateModel, ValidationError } from '@/lib/q3gen';
 
 export async function POST(request: NextRequest) {
   try {

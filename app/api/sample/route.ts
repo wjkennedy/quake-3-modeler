@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MeshBuilder, Material, ProceduralGeometry, mergeMeshes } from '@q3gen/core';
+import { MeshBuilder, Material, ProceduralGeometry, mergeMeshes } from '@/lib/q3gen';
 
 export async function GET() {
   try {
