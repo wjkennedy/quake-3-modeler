@@ -1,13 +1,23 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { ModelEditor } from '@/components/ModelEditor';
-import { Previewer3D } from '@/components/Previewer3D';
 import { AnimationTimeline } from '@/components/AnimationTimeline';
 import { ExportPanel } from '@/components/ExportPanel';
 import { AnimationEditor } from '@/components/AnimationEditor';
 import { BoneInspector } from '@/components/BoneInspector';
 import { LODSettings } from '@/components/LODSettings';
+
+// Dynamically import Previewer3D to avoid SSR issues with Three.js
+const Previewer3D = dynamic(() => import('@/components/Previewer3D').then(mod => ({ default: mod.Previewer3D })), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full text-muted-foreground">
+      Loading 3D viewer...
+    </div>
+  ),
+});
 
 export default function Page() {
   const [modelJson, setModelJson] = useState<string>('');
