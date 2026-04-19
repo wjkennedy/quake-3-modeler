@@ -8,6 +8,7 @@ import { ExportPanel } from '@/components/ExportPanel';
 import { AnimationEditor } from '@/components/AnimationEditor';
 import { BoneInspector } from '@/components/BoneInspector';
 import { LODSettings } from '@/components/LODSettings';
+import { FileUpload } from '@/components/FileUpload';
 
 // Dynamically import Previewer3D to avoid SSR issues with Three.js
 const Previewer3D = dynamic(() => import('@/components/Previewer3D').then(mod => ({ default: mod.Previewer3D })), {
@@ -84,6 +85,7 @@ export default function Page() {
         <div className="p-4 border-b border-border bg-card space-y-3">
           <h1 className="text-2xl font-bold">Quake 3 Model Generator</h1>
           <div className="flex gap-2 flex-wrap">
+            <FileUpload onModelLoad={setModelJson} />
             <button
               onClick={handleLoadSample}
               className="px-3 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 text-sm font-medium"
