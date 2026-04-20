@@ -109,6 +109,60 @@ export function parseGLB(glbBuffer: ArrayBuffer, material: Material): Mesh {
  */
 export class ProceduralGeometry {
   /**
+   * Create a sphere mesh
+   */
+  static createSphere(
+    material: Material,
+    radius: number = 1,
+    widthSegments: number = 32,
+    heightSegments: number = 16,
+    position: Vec3 = { x: 0, y: 0, z: 0 }
+  ): Mesh {
+    const vertices: Vertex[] = [];
+    const faces: Face[] = [];
+
+    for (let y = 0; y <= heightSegments; y++) {
+      const theta = (y * Math.PI) / heightSegments;
+      const sinTheta = Math.sin(theta);
+      const cosTheta = Math.cos(theta);
+
+      for (let x = 0; x <= widthSegments; x++) {
+        const phi = (x * 2 * Math.PI) / widthSegments;
+        const sinPhi = Math.sin(phi);
+        const cosPhi = Math.cos(phi);
+
+        const px = position.x + radius * cosPhi * sinTheta;
+        const py = position.y + radius * cosTheta;
+        const pz = position.z + radius * sinPhi * sinTheta;
+
+        vertices.push({
+          position: { x: px, y: py, z: pz },
+          normal: { x: cosPhi * sinTheta, y: cosTheta, z: sinPhi * sinTheta },
+          uv: { u: x / widthSegments, v: y / heightSegments },
+        });
+      }
+    }
+
+    for (let y = 0; y < heightSegments; y++) {
+      for (let x = 0; x < widthSegments; x++) {
+        const a = y * (widthSegments + 1) + x;
+        const b = a + widthSegments + 1;
+
+        faces.push({ indices: [a, b, a + 1], materialId: material.id });
+        faces.push({ indices: [b, b + 1, a + 1], materialId: material.id });
+      }
+    }
+
+    return {
+      id: `mesh_sphere_${Date.now()}`,
+      name: 'Sphere',
+      vertices,
+      faces,
+      material,
+    };
+  }
+
+  /**
    * Create a cylinder mesh
    */
   static createCylinder(
