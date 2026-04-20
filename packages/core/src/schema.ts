@@ -28,11 +28,23 @@ export const MaterialSchema = z.object({
   id: z.string(),
   name: z.string(),
   diffuse: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]),
+  texturePath: z.string().optional(),
   emissive: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).optional(),
   shininess: z.number().min(0).max(128).optional().default(32),
 });
 
 export type Material = z.infer<typeof MaterialSchema>;
+
+export const EmbeddedTextureSchema = z.object({
+  name: z.string(),
+  url: z.string(),
+  type: z.string(),
+  sourceName: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  previewUrl: z.string().optional(),
+});
+
+export type EmbeddedTexture = z.infer<typeof EmbeddedTextureSchema>;
 
 // Vertex with bone weights
 export const VertexSchema = z.object({
@@ -147,6 +159,7 @@ export const ModelSchema = z.object({
   animations: z.array(AnimationTrackSchema),
   tags: z.array(TagSchema).optional().default([]),
   lodConfigs: z.array(LODConfigSchema).optional().default([]),
+  embeddedTextures: z.record(EmbeddedTextureSchema).optional(),
   scale: z.number().positive().default(1),
 });
 
@@ -172,7 +185,7 @@ export type AnimationConfig = z.infer<typeof AnimationConfigSchema>;
 // Export result
 export const ExportResultSchema = z.object({
   success: z.boolean(),
-  format: z.enum(['md3', 'md5', 'gltf']),
+  format: z.enum(['md3', 'md5', 'gltf', 'pk3']),
   data: z.any(),
   warnings: z.array(z.string()).optional(),
 });
