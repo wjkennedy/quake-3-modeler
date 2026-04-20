@@ -6,47 +6,41 @@ import { Model, AnimationConfigEntry } from './schema';
  */
 export class MD3Exporter {
   static export(model: Model): ArrayBuffer {
-    // MD3 header structure
     const magic = 0x33504449; // "IDP3"
     const version = 15;
     const flags = 0;
-
-    // Calculate sizes
-    const numFrames = 1; // Simplified: single frame for now
+    const numFrames = 1;
     const numTags = model.tags?.length || 0;
     const numSurfaces = model.meshes.length;
-
-    // Create buffer
     const headerSize = 108;
     const frameSize = 56;
     const tagSize = 112;
     const surfaceHeaderSize = 108;
+    const shaderSize = 68;
 
     let totalSize = headerSize + numFrames * frameSize + numTags * tagSize;
 
-    // Calculate surface sizes
     model.meshes.forEach((mesh) => {
       const numVerts = mesh.vertices.length;
       const numTris = mesh.faces.length;
       totalSize += surfaceHeaderSize;
-      totalSize += numTris * 12; // Triangle indices (3 * uint)
-      totalSize += numVerts * 4; // Shader references (uint per vertex)
-      totalSize += numVerts * 12; // Vertex coordinates (3 * float)
-      totalSize += numVerts * 1; // Vertex lightmap coordinates (uint8[2])
-      totalSize += numVerts * 1; // Vertex normals (2 bytes for normal encoding)
+      totalSize += numTris * 12;
+      totalSize += shaderSize;
+      totalSize += numVerts * 8;
+      totalSize += numFrames * numVerts * 8;
     });
 
     const buffer = new ArrayBuffer(totalSize);
     const view = new DataView(buffer);
     let offset = 0;
+    const encoder = new TextEncoder();
 
-    // Write header
     view.setUint32(offset, magic, true);
     offset += 4;
     view.setUint32(offset, version, true);
     offset += 4;
 
-    // Filename (64 bytes)
+    writeFixedString(buffer, offset, model.name || 'model', 64, encoder);
     offset += 64;
 
     view.setUint32(offset, flags, true);
@@ -57,10 +51,9 @@ export class MD3Exporter {
     offset += 4;
     view.setUint32(offset, numSurfaces, true);
     offset += 4;
-    view.setUint32(offset, numFrames, true); // num skins
+    view.setUint32(offset, 0, true); // num skins
     offset += 4;
 
-    // Frame offset, tag offset, surface offset (will be set after)
     const frameOffsetPos = offset;
     offset += 4;
     const tagOffsetPos = offset;
@@ -70,42 +63,34 @@ export class MD3Exporter {
     const eofPos = offset;
     offset += 4;
 
-    // Write frame data
     const frameOffset = offset;
-    for (let i = 0; i < numFrames; i++) {
-      view.setFloat32(offset, -128, true);
-      offset += 4; // min x
-      view.setFloat32(offset, -128, true);
-      offset += 4; // min y
-      view.setFloat32(offset, -128, true);
-      offset += 4; // min z
-      view.setFloat32(offset, 127, true);
-      offset += 4; // max x
-      view.setFloat32(offset, 127, true);
-      offset += 4; // max y
-      view.setFloat32(offset, 127, true);
-      offset += 4; // max z
-      view.setFloat32(offset, 0, true);
-      offset += 4; // origin x
-      view.setFloat32(offset, 0, true);
-      offset += 4; // origin y
-      view.setFloat32(offset, 0, true);
-      offset += 4; // origin z
-      view.setFloat32(offset, 1, true);
-      offset += 4; // scale
-      offset += 16; // creator (4 chars)
-    }
+    const bounds = calculateBounds(model);
+    view.setFloat32(offset, bounds.minX, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.minY, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.minZ, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.maxX, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.maxY, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.maxZ, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.originX, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.originY, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.originZ, true);
+    offset += 4;
+    view.setFloat32(offset, bounds.radius, true);
+    offset += 4;
+    writeFixedString(buffer, offset, 'q3gen', 16, encoder);
+    offset += 16;
 
-    // Write tags
     const tagOffset = offset;
     model.tags?.forEach((tag) => {
-      // Tag name (64 bytes)
-      const encoder = new TextEncoder();
-      const nameBytes = encoder.encode(tag.name);
-      const view8 = new Uint8Array(buffer, offset, 64);
-      for (let i = 0; i < Math.min(nameBytes.length, 64); i++) {
-        view8[i] = nameBytes[i];
-      }
+      writeFixedString(buffer, offset, tag.name, 64, encoder);
       offset += 64;
 
       view.setFloat32(offset, tag.position.x, true);
@@ -122,17 +107,15 @@ export class MD3Exporter {
       }
     });
 
-    // Write surfaces
     const surfaceOffset = offset;
     model.meshes.forEach((mesh) => {
       const surfaceHeaderPos = offset;
       offset += surfaceHeaderSize;
-
       const numVerts = mesh.vertices.length;
       const numTris = mesh.faces.length;
+      const numShaders = 1;
 
-      // Write triangles
-      const triangleOffset = offset;
+      const trianglesOffset = offset - surfaceHeaderPos;
       mesh.faces.forEach((face) => {
         view.setUint32(offset, face.indices[0], true);
         offset += 4;
@@ -142,72 +125,107 @@ export class MD3Exporter {
         offset += 4;
       });
 
-      // Write shader references
-      const shaderOffset = offset;
-      for (let i = 0; i < numVerts; i++) {
-        view.setUint32(offset, 0, true);
-        offset += 4;
-      }
+      const shadersOffset = offset - surfaceHeaderPos;
+      writeFixedString(buffer, offset, mesh.material.texturePath || mesh.material.name || 'shader', 64, encoder);
+      offset += 64;
+      view.setUint32(offset, 0, true);
+      offset += 4;
 
-      // Write vertices
-      const vertexOffset = offset;
+      const texCoordsOffset = offset - surfaceHeaderPos;
       mesh.vertices.forEach((vertex) => {
-        view.setInt16(offset, Math.round(vertex.position.x * 64), true);
+        view.setFloat32(offset, vertex.uv?.u || 0, true);
+        offset += 4;
+        view.setFloat32(offset, vertex.uv?.v || 0, true);
+        offset += 4;
+      });
+
+      const verticesOffset = offset - surfaceHeaderPos;
+      mesh.vertices.forEach((vertex) => {
+        view.setInt16(offset, clampInt16(Math.round(vertex.position.x * 64)), true);
         offset += 2;
-        view.setInt16(offset, Math.round(vertex.position.y * 64), true);
+        view.setInt16(offset, clampInt16(Math.round(vertex.position.y * 64)), true);
         offset += 2;
-        view.setInt16(offset, Math.round(vertex.position.z * 64), true);
+        view.setInt16(offset, clampInt16(Math.round(vertex.position.z * 64)), true);
         offset += 2;
-        view.setUint16(offset, 0, true);
+        view.setUint16(offset, encodeNormal(vertex.normal), true);
         offset += 2;
       });
 
-      // Fill in surface header
-      const surfaceView = new DataView(buffer, surfaceHeaderPos);
-      let surfaceHeaderOffset = 0;
-
-      const surfaceMagic = 0x33504449; // "IDP3"
-      surfaceView.setUint32(surfaceHeaderOffset, surfaceMagic, true);
-      surfaceHeaderOffset += 4;
-
-      offset = surfaceHeaderPos + 4;
-      const encoder = new TextEncoder();
-      const nameBytes = encoder.encode(mesh.name || 'Surface');
-      const view8 = new Uint8Array(buffer, offset, 64);
-      for (let i = 0; i < Math.min(nameBytes.length, 64); i++) {
-        view8[i] = nameBytes[i];
-      }
-      offset = surfaceHeaderPos + 68;
-
-      const surfaceFlags = 0;
-      new DataView(buffer, offset).setUint32(0, surfaceFlags, true);
-      offset += 4;
-      new DataView(buffer, offset).setUint32(0, numVerts, true);
-      offset += 4;
-      new DataView(buffer, offset).setUint32(0, numTris, true);
-      offset += 4;
-      new DataView(buffer, offset).setUint32(0, triangleOffset - surfaceHeaderPos, true);
-      offset += 4;
-      new DataView(buffer, offset).setUint32(0, 1, true);
-      offset += 4; // num shaders
-      new DataView(buffer, offset).setUint32(0, shaderOffset - surfaceHeaderPos, true);
-      offset += 4;
-      new DataView(buffer, offset).setUint32(0, 0, true);
-      offset += 4; // uv offset
-      new DataView(buffer, offset).setUint32(0, vertexOffset - surfaceHeaderPos, true);
-      offset += 4;
-      new DataView(buffer, offset).setUint32(0, surfaceHeaderPos + surfaceHeaderSize, true);
-      offset += 4; // next surface
+      const nextSurfaceOffset = offset - surfaceHeaderPos;
+      view.setUint32(surfaceHeaderPos, magic, true);
+      writeFixedString(buffer, surfaceHeaderPos + 4, mesh.name || 'Surface', 64, encoder);
+      view.setUint32(surfaceHeaderPos + 68, 0, true);
+      view.setUint32(surfaceHeaderPos + 72, numFrames, true);
+      view.setUint32(surfaceHeaderPos + 76, numShaders, true);
+      view.setUint32(surfaceHeaderPos + 80, numVerts, true);
+      view.setUint32(surfaceHeaderPos + 84, numTris, true);
+      view.setUint32(surfaceHeaderPos + 88, trianglesOffset, true);
+      view.setUint32(surfaceHeaderPos + 92, shadersOffset, true);
+      view.setUint32(surfaceHeaderPos + 96, texCoordsOffset, true);
+      view.setUint32(surfaceHeaderPos + 100, verticesOffset, true);
+      view.setUint32(surfaceHeaderPos + 104, nextSurfaceOffset, true);
     });
 
-    // Set file offsets in header
-    new DataView(buffer, frameOffsetPos).setUint32(0, frameOffset, true);
-    new DataView(buffer, tagOffsetPos).setUint32(0, tagOffset, true);
-    new DataView(buffer, surfaceOffsetPos).setUint32(0, surfaceOffset, true);
-    new DataView(buffer, eofPos).setUint32(0, offset, true);
+    view.setUint32(frameOffsetPos, frameOffset, true);
+    view.setUint32(tagOffsetPos, tagOffset, true);
+    view.setUint32(surfaceOffsetPos, surfaceOffset, true);
+    view.setUint32(eofPos, offset, true);
 
     return buffer.slice(0, offset);
   }
+}
+
+function writeFixedString(buffer: ArrayBuffer, offset: number, value: string, length: number, encoder: TextEncoder): void {
+  const bytes = encoder.encode(value);
+  const target = new Uint8Array(buffer, offset, length);
+  target.fill(0);
+  target.set(bytes.subarray(0, Math.max(0, length - 1)));
+}
+
+function calculateBounds(model: Model) {
+  const positions = model.meshes.flatMap((mesh) => mesh.vertices.map((vertex) => vertex.position));
+
+  if (positions.length === 0) {
+    return { minX: -1, minY: -1, minZ: -1, maxX: 1, maxY: 1, maxZ: 1, originX: 0, originY: 0, originZ: 0, radius: 1 };
+  }
+
+  const minX = Math.min(...positions.map((position) => position.x));
+  const minY = Math.min(...positions.map((position) => position.y));
+  const minZ = Math.min(...positions.map((position) => position.z));
+  const maxX = Math.max(...positions.map((position) => position.x));
+  const maxY = Math.max(...positions.map((position) => position.y));
+  const maxZ = Math.max(...positions.map((position) => position.z));
+  const originX = (minX + maxX) / 2;
+  const originY = (minY + maxY) / 2;
+  const originZ = (minZ + maxZ) / 2;
+  const radius = Math.max(
+    ...positions.map((position) =>
+      Math.hypot(position.x - originX, position.y - originY, position.z - originZ)
+    )
+  );
+
+  return { minX, minY, minZ, maxX, maxY, maxZ, originX, originY, originZ, radius };
+}
+
+function clampInt16(value: number): number {
+  return Math.max(-32768, Math.min(32767, value));
+}
+
+function encodeNormal(normal: { x: number; y: number; z: number } | undefined): number {
+  if (!normal) return 0;
+
+  const length = Math.hypot(normal.x, normal.y, normal.z);
+  if (!length) return 0;
+
+  const x = normal.x / length;
+  const y = normal.y / length;
+  const z = normal.z / length;
+  const lat = Math.acos(Math.max(-1, Math.min(1, z)));
+  const lng = Math.atan2(y, x);
+  const latByte = Math.round((lat * 255) / (2 * Math.PI)) & 0xff;
+  const lngByte = Math.round((((lng + 2 * Math.PI) % (2 * Math.PI)) * 255) / (2 * Math.PI)) & 0xff;
+
+  return (latByte << 8) | lngByte;
 }
 
 /**

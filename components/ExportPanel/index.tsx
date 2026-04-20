@@ -3,15 +3,15 @@
 import { useCallback } from 'react';
 
 interface ExportPanelProps {
-  format: 'md3' | 'md5' | 'gltf';
-  onFormatChange: (format: 'md3' | 'md5' | 'gltf') => void;
+  format: 'md3' | 'md5' | 'gltf' | 'pk3';
+  onFormatChange: (format: 'md3' | 'md5' | 'gltf' | 'pk3') => void;
   onExport: () => void;
 }
 
 export function ExportPanel({ format, onFormatChange, onExport }: ExportPanelProps) {
   const handleFormatChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
-      onFormatChange(e.target.value as 'md3' | 'md5' | 'gltf');
+      onFormatChange(e.target.value as 'md3' | 'md5' | 'gltf' | 'pk3');
     },
     [onFormatChange]
   );
@@ -27,6 +27,7 @@ export function ExportPanel({ format, onFormatChange, onExport }: ExportPanelPro
           className="w-full px-3 py-2 border border-input rounded bg-background text-foreground text-sm"
         >
           <option value="md3">MD3 (Quake 3)</option>
+          <option value="pk3">PK3 (MD3 + textures)</option>
           <option value="md5">MD5 (Doom 3)</option>
           <option value="gltf">glTF (Universal)</option>
         </select>
