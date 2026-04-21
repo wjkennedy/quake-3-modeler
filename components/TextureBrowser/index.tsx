@@ -13,17 +13,28 @@ interface TextureAsset {
   isPlaceholder?: boolean;
 }
 
+interface MaterialTarget {
+  id: string;
+  meshId: string;
+  meshName: string;
+  materialName: string;
+  textureName: string;
+  texture: TextureAsset;
+  isSharedTexture: boolean;
+}
+
 interface TextureBrowserProps {
   modelJson: string;
   textures: Record<string, TextureAsset>;
-  onTextureLoad: (name: string, url: string, type: string, sourceName?: string, previewUrl?: string) => void;
   onModelUpdate: (modelJson: string) => void;
 }
 
-export function TextureBrowser({ modelJson, textures, onTextureLoad, onModelUpdate }: TextureBrowserProps) {
+const tgaPreviewCache = new Map<string, Promise<string>>();
+
+export function TextureBrowser({ modelJson, textures, onModelUpdate }: TextureBrowserProps) {
   const model = useMemo(() => parseModel(modelJson), [modelJson]);
   const embeddedTextures = (model?.embeddedTextures || {}) as Record<string, TextureAsset>;
-  const textureList = useMemo(() => buildTextureList(model, embeddedTextures, textures), [model, embeddedTextures, textures]);
+  const materialTargets = useMemo(() => buildMaterialTargets(model, embeddedTextures, textures), [model, embeddedTextures, textures]);
 
   if (!model) {
     return null;
@@ -32,43 +43,42 @@ export function TextureBrowser({ modelJson, textures, onTextureLoad, onModelUpda
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-semibold">Textures</h3>
-        <p className="text-xs text-muted-foreground">Replace textures directly from a tile.</p>
+        <h3 className="font-semibold">Material Textures</h3>
+        <p className="text-xs text-muted-foreground">Each material target has a direct texture slot.</p>
       </div>
 
-      {textureList.length > 0 ? (
+      {materialTargets.length > 0 ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {textureList.map(texture => (
-            <TextureTile
-              key={`${texture.name}:${texture.url}`}
-              texture={texture}
+          {materialTargets.map(target => (
+            <MaterialTargetTile
+              key={target.id}
+              target={target}
               model={model}
-              onTextureLoad={onTextureLoad}
               onModelUpdate={onModelUpdate}
             />
           ))}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">No textures loaded yet.</p>
+        <p className="text-sm text-muted-foreground">No material targets found yet.</p>
       )}
     </div>
   );
 }
 
-function TextureTile({
-  texture,
+function MaterialTargetTile({
+  target,
   model,
-  onTextureLoad,
   onModelUpdate,
 }: {
-  texture: TextureAsset;
+  target: MaterialTarget;
   model: any;
-  onTextureLoad: (name: string, url: string, type: string, sourceName?: string, previewUrl?: string) => void;
   onModelUpdate: (modelJson: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const texture = target.texture;
   const [previewUrl, setPreviewUrl] = useState(texture.previewUrl || texture.url);
   const [convertedUrl, setConvertedUrl] = useState('');
+  const [isReplacing, setIsReplacing] = useState(false);
   const sourceName = texture.sourceName || texture.name;
   const sourceIsTga = sourceName.toLowerCase().endsWith('.tga');
   const needsTgaDecode = texture.type === 'image/x-tga' || texture.name.toLowerCase().endsWith('.tga');
@@ -91,9 +101,16 @@ function TextureTile({
   const replaceTexture = async (file: File | undefined) => {
     if (!file) return;
 
-    const replacement = await imageFileToTgaAsset(file, sourceName);
-    onTextureLoad(replacement.name, replacement.url, replacement.type, replacement.sourceName, replacement.previewUrl);
-    onModelUpdate(JSON.stringify(updateModelTexture(model, texture, replacement), null, 2));
+    setIsReplacing(true);
+    try {
+      const replacementName = target.isSharedTexture
+        ? createTargetTexturePath(model?.name || 'model', target.meshName, target.materialName)
+        : target.textureName;
+      const replacement = await imageFileToTgaAsset(file, replacementName);
+      onModelUpdate(JSON.stringify(updateMaterialTargetTexture(model, target, replacement), null, 2));
+    } finally {
+      setIsReplacing(false);
+    }
 
     if (inputRef.current) {
       inputRef.current.value = '';
@@ -102,24 +119,29 @@ function TextureTile({
 
   return (
     <div className="border border-border rounded p-2 bg-background space-y-2">
-      <div className="aspect-square bg-muted overflow-hidden rounded">
+      <button type="button" onClick={() => inputRef.current?.click()} className="block w-full aspect-square bg-muted overflow-hidden rounded text-left">
         <img src={previewUrl} alt={texture.name} className="w-full h-full object-contain" />
-      </div>
+      </button>
       <div className="space-y-1">
-        <div className="text-xs truncate" title={sourceName}>{sourceName}</div>
+        <div className="text-xs font-medium truncate" title={target.meshName}>{target.meshName}</div>
+        <div className="text-[10px] text-muted-foreground truncate" title={target.materialName}>{target.materialName}</div>
+        <div className="text-[10px] truncate" title={target.textureName}>{target.textureName}</div>
         {texture.isPlaceholder && (
           <div className="text-[10px] text-muted-foreground">No image loaded</div>
+        )}
+        {target.isSharedTexture && (
+          <div className="text-[10px] text-muted-foreground">Shared texture. Replacing creates a separate slot.</div>
         )}
       </div>
       <input
         ref={inputRef}
         type="file"
-        accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+        accept=".png,.jpg,.jpeg,.webp,.tga,image/png,image/jpeg,image/webp,image/x-tga"
         onChange={event => replaceTexture(event.target.files?.[0])}
         className="hidden"
       />
-      <button type="button" onClick={() => inputRef.current?.click()} className="w-full px-2 py-1 bg-primary text-primary-foreground rounded text-xs">
-        Replace
+      <button type="button" onClick={() => inputRef.current?.click()} disabled={isReplacing} className="w-full px-2 py-1 bg-primary text-primary-foreground rounded text-xs disabled:opacity-50">
+        {isReplacing ? 'Applying...' : 'Choose Texture'}
       </button>
       {sourceIsTga && (
         <div className="flex gap-2">
@@ -147,42 +169,40 @@ function parseModel(modelJson: string): any | null {
   }
 }
 
-function uniqueTextures(textures: Record<string, TextureAsset>): TextureAsset[] {
-  const seen = new Set<string>();
-  return Object.values(textures).filter(texture => {
-    const key = `${texture.name}:${texture.url}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function buildTextureList(model: any, embeddedTextures: Record<string, TextureAsset>, textures: Record<string, TextureAsset>): TextureAsset[] {
-  const combined = { ...embeddedTextures, ...textures };
-  const list = uniqueTextures(combined);
-  const seenNames = new Set(list.flatMap(texture => getTextureKeys(texture.sourceName || texture.name)));
+function buildMaterialTargets(model: any, embeddedTextures: Record<string, TextureAsset>, textures: Record<string, TextureAsset>): MaterialTarget[] {
+  const combined = { ...textures, ...embeddedTextures };
 
   if (!Array.isArray(model?.meshes)) {
-    return list;
+    return [];
   }
 
-  model.meshes.forEach((mesh: any) => {
-    const textureName = mesh?.material?.texturePath || mesh?.material?.name;
-    if (!textureName) {
-      return;
-    }
-
-    const keys = getTextureKeys(textureName);
-    if (keys.some(key => seenNames.has(key))) {
-      return;
-    }
-
-    const placeholder = createPlaceholderTexture(textureName);
-    list.push(placeholder);
-    keys.forEach(key => seenNames.add(key));
+  const textureCounts = new Map<string, number>();
+  model.meshes.forEach((mesh: any, meshIndex: number) => {
+    const textureName = getTargetTextureName(model, mesh, meshIndex);
+    const key = normalizeTextureKey(textureName);
+    textureCounts.set(key, (textureCounts.get(key) || 0) + 1);
   });
 
-  return list.sort((a, b) => (a.sourceName || a.name).localeCompare(b.sourceName || b.name));
+  return model.meshes
+    .filter((mesh: any) => mesh?.material)
+    .map((mesh: any, meshIndex: number) => {
+      const textureName = getTargetTextureName(model, mesh, meshIndex);
+      const texture = findTextureForName(textureName, combined) || createPlaceholderTexture(textureName);
+      const meshName = mesh.name || `mesh_${meshIndex}`;
+      const materialName = mesh.material?.name || mesh.material?.id || meshName;
+      const meshId = String(mesh.id || meshName);
+
+      return {
+        id: `${meshId}:${textureName}`,
+        meshId,
+        meshName,
+        materialName,
+        textureName,
+        texture,
+        isSharedTexture: (textureCounts.get(normalizeTextureKey(textureName)) || 0) > 1,
+      };
+    })
+    .sort((a, b) => a.meshName.localeCompare(b.meshName) || a.materialName.localeCompare(b.materialName));
 }
 
 function createPlaceholderTexture(textureName: string): TextureAsset {
@@ -210,8 +230,20 @@ function createPlaceholderTexture(textureName: string): TextureAsset {
 }
 
 async function tgaToPng(texture: TextureAsset): Promise<string> {
+  const cacheKey = texture.sourceUrl || texture.url;
+  const cached = tgaPreviewCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const conversion = decodeTgaToPng(texture);
+  tgaPreviewCache.set(cacheKey, conversion);
+  return conversion;
+}
+
+async function decodeTgaToPng(texture: TextureAsset): Promise<string> {
   const loader = new TGALoader();
-  const loaded = await loader.loadAsync(texture.url);
+  const loaded = await loader.loadAsync(texture.sourceUrl || texture.url);
   const image = loaded.image as unknown as { data: Uint8Array; width: number; height: number };
   const canvas = document.createElement('canvas');
   canvas.width = image.width;
@@ -227,6 +259,25 @@ async function tgaToPng(texture: TextureAsset): Promise<string> {
 }
 
 async function imageFileToTgaAsset(file: File, targetName: string): Promise<TextureAsset> {
+  const isTga = file.name.toLowerCase().endsWith('.tga') || file.type === 'image/x-tga';
+  if (isTga) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const decodeUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/x-tga' }));
+    const name = targetName.replace(/\.(jpe?g|png|webp|tga)$/i, '.tga');
+    const sourceUrl = await bytesToDataUrl(bytes, 'image/x-tga');
+    const previewUrl = await tgaToPng({ name, url: decodeUrl, type: 'image/x-tga' });
+    URL.revokeObjectURL(decodeUrl);
+
+    return {
+      name,
+      sourceName: name,
+      type: 'image/x-tga',
+      url: sourceUrl,
+      sourceUrl,
+      previewUrl,
+    };
+  }
+
   const previewUrl = URL.createObjectURL(file);
   const image = await loadImage(previewUrl);
   const canvas = document.createElement('canvas');
@@ -242,15 +293,15 @@ async function imageFileToTgaAsset(file: File, targetName: string): Promise<Text
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
   const name = targetName.replace(/\.(jpe?g|png|webp|tga)$/i, '.tga');
   const tgaBytes = encodeTga(imageData);
-  const url = URL.createObjectURL(new Blob([tgaBytes], { type: 'image/x-tga' }));
+  const sourceUrl = await bytesToDataUrl(tgaBytes, 'image/x-tga');
+  URL.revokeObjectURL(previewUrl);
 
   return {
     name,
     sourceName: name,
     type: 'image/x-tga',
-    url,
-    sourceUrl: await bytesToDataUrl(tgaBytes, 'image/x-tga'),
-    previewUrl,
+    url: sourceUrl,
+    sourceUrl,
   };
 }
 
@@ -286,15 +337,13 @@ function encodeTga(imageData: ImageData): Uint8Array {
   return output;
 }
 
-function updateModelTexture(model: any, oldTexture: TextureAsset, newTexture: TextureAsset): any {
-  const oldKeys = new Set(getTextureKeys(oldTexture.sourceName || oldTexture.name));
+function updateMaterialTargetTexture(model: any, target: MaterialTarget, newTexture: TextureAsset): any {
   const embeddedTexture = {
     name: newTexture.name,
     sourceName: newTexture.sourceName || newTexture.name,
     sourceUrl: newTexture.sourceUrl || newTexture.url,
     url: newTexture.sourceUrl || newTexture.url,
     type: newTexture.type,
-    previewUrl: newTexture.previewUrl,
   };
   const embeddedTextures = {
     ...(model.embeddedTextures || {}),
@@ -311,9 +360,9 @@ function updateModelTexture(model: any, oldTexture: TextureAsset, newTexture: Te
     ...model,
     embeddedTextures,
     meshes: Array.isArray(model.meshes)
-      ? model.meshes.map((mesh: any) => {
-          const texturePath = mesh.material?.texturePath || mesh.material?.name;
-          if (!texturePath || !getTextureKeys(texturePath).some(key => oldKeys.has(key))) {
+      ? model.meshes.map((mesh: any, meshIndex: number) => {
+          const meshId = String(mesh.id || mesh.name || `mesh_${meshIndex}`);
+          if (meshId !== target.meshId) {
             return mesh;
           }
 
@@ -329,6 +378,34 @@ function updateModelTexture(model: any, oldTexture: TextureAsset, newTexture: Te
   };
 }
 
+function findTextureForName(textureName: string, textures: Record<string, TextureAsset>): TextureAsset | null {
+  const keys = getTextureKeys(textureName);
+
+  for (const key of keys) {
+    if (textures[key]) {
+      return textures[key];
+    }
+  }
+
+  return Object.values(textures).find(texture =>
+    getTextureKeys(texture.sourceName || texture.name).some(key => keys.includes(key))
+  ) || null;
+}
+
+function getTargetTextureName(model: any, mesh: any, meshIndex: number): string {
+  return mesh?.material?.texturePath
+    || mesh?.material?.name
+    || createTargetTexturePath(model?.name || 'model', mesh?.name || `mesh_${meshIndex}`, mesh?.material?.id || 'material');
+}
+
+function createTargetTexturePath(modelName: string, meshName: string, materialName: string): string {
+  return `models/generated/${slugify(modelName)}/${slugify(meshName)}_${slugify(materialName)}.tga`;
+}
+
+function slugify(value: string): string {
+  return value.toLowerCase().replace(/\\/g, '/').replace(/[^a-z0-9/_-]+/g, '_').replace(/^_+|_+$/g, '') || 'texture';
+}
+
 function bytesToDataUrl(bytes: Uint8Array, type: string): Promise<string> {
   return new Promise(resolve => {
     const reader = new FileReader();
@@ -340,12 +417,16 @@ function bytesToDataUrl(bytes: Uint8Array, type: string): Promise<string> {
 function getTextureKeys(value: string): string[] {
   if (!value) return [];
 
-  const normalized = value.toLowerCase().replace(/\\/g, '/').replace(/^\/+/, '');
+  const normalized = normalizeTextureKey(value);
   const withoutExtension = normalized.replace(/\.[^/.]+$/, '');
   const fileName = normalized.split('/').pop() || normalized;
   const baseName = fileName.replace(/\.[^/.]+$/, '');
 
   return Array.from(new Set([normalized, withoutExtension, fileName, baseName].filter(Boolean)));
+}
+
+function normalizeTextureKey(value: string): string {
+  return value.toLowerCase().replace(/\\/g, '/').replace(/^\/+/, '');
 }
 
 function escapeXml(value: string): string {

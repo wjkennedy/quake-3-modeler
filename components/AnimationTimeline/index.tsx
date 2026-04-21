@@ -15,7 +15,7 @@ export function AnimationTimeline({ modelJson, onAnimationSelect }: AnimationTim
   const animations = useMemo(() => {
     try {
       const model = JSON.parse(modelJson);
-      return model.animations || [];
+      return normalizeAnimations(model.animations);
     } catch {
       return [];
     }
@@ -187,4 +187,38 @@ export function AnimationTimeline({ modelJson, onAnimationSelect }: AnimationTim
       )}
     </div>
   );
+}
+
+function normalizeAnimations(animations: any): any[] {
+  const list = Array.isArray(animations)
+    ? animations
+    : animations && typeof animations === 'object'
+      ? Object.entries(animations).map(([key, value]) => ({ id: key, ...(value as Record<string, unknown>) }))
+      : [];
+
+  return list.map((animation: any, index: number) => {
+    const keyframes = Array.isArray(animation?.keyframes)
+      ? animation.keyframes
+      : Array.isArray(animation?.frames)
+        ? animation.frames
+        : [];
+
+    const totalFrames = Number.isFinite(animation?.totalFrames)
+      ? animation.totalFrames
+      : Number.isFinite(animation?.frameCount)
+        ? animation.frameCount
+        : keyframes.length > 0
+          ? Math.max(...keyframes.map((keyframe: any) => Number(keyframe?.frameIndex) || 0)) + 1
+          : 1;
+
+    return {
+      ...animation,
+      id: animation?.id || animation?.name || `animation_${index}`,
+      name: animation?.name || animation?.id || `Animation ${index + 1}`,
+      fps: Number.isFinite(animation?.fps) ? animation.fps : 30,
+      totalFrames,
+      looping: typeof animation?.looping === 'boolean' ? animation.looping : true,
+      keyframes,
+    };
+  });
 }

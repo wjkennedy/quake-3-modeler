@@ -11,6 +11,7 @@ import { LODSettings } from '@/components/LODSettings';
 import { FileUpload } from '@/components/FileUpload';
 import { BotEditor } from '@/components/BotEditor';
 import { TextureBrowser } from '@/components/TextureBrowser';
+import { UVTemplatePainter } from '@/components/UVTemplatePainter';
 
 interface TextureAsset {
   name: string;
@@ -34,7 +35,7 @@ const Previewer3D = dynamic(() => import('@/components/Previewer3D').then(mod =>
 export default function Page() {
   const [modelJson, setModelJson] = useState<string>('');
   const [selectedAnimation, setSelectedAnimation] = useState<string>('');
-  const [exportFormat, setExportFormat] = useState<'md3' | 'md5' | 'gltf' | 'pk3'>('md3');
+  const [exportFormat, setExportFormat] = useState<'md3' | 'md5' | 'gltf' | 'pk3' | 'widget'>('md3');
   const [showTools, setShowTools] = useState(false);
   const [textures, setTextures] = useState<Record<string, TextureAsset>>({});
   const texturesRef = useRef<Record<string, TextureAsset>>({});
@@ -138,7 +139,7 @@ export default function Page() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `model.${exportFormat}`;
+      a.download = `model.${getExportExtension(exportFormat)}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -182,7 +183,8 @@ export default function Page() {
             <LODSettings modelJson={modelJson} onModelUpdate={setModelJson} />
             <BoneInspector modelJson={modelJson} onModelUpdate={setModelJson} />
             <BotEditor modelJson={modelJson} onModelUpdate={setModelJson} />
-            <TextureBrowser modelJson={modelJson} textures={textures} onTextureLoad={handleTextureLoad} onModelUpdate={setModelJson} />
+            <TextureBrowser modelJson={modelJson} textures={textures} onModelUpdate={setModelJson} />
+            <UVTemplatePainter modelJson={modelJson} textures={textures} onModelUpdate={setModelJson} />
           </div>
         )}
 
@@ -225,6 +227,10 @@ export default function Page() {
       </div>
     </div>
   );
+}
+
+function getExportExtension(format: 'md3' | 'md5' | 'gltf' | 'pk3' | 'widget'): string {
+  return format === 'widget' ? 'html' : format;
 }
 
 function getTextureKeys(name: string): string[] {
@@ -283,9 +289,9 @@ async function prepareModelForExport(model: any, textures: Record<string, Textur
 }
 
 async function serializeTextureAsset(texture: TextureAsset): Promise<TextureAsset | null> {
-  const url = await toSerializableUrl(texture.url);
-  const sourceUrl = texture.sourceUrl ? await toSerializableUrl(texture.sourceUrl) : url;
-  const previewUrl = texture.previewUrl ? await toSerializableUrl(texture.previewUrl) : undefined;
+  const sourceUrl = await firstSerializableUrl([texture.sourceUrl, texture.url, texture.previewUrl]);
+  const url = sourceUrl || await firstSerializableUrl([texture.url, texture.previewUrl]);
+  const previewUrl = await firstSerializableUrl([texture.previewUrl]);
 
   if (!url && !sourceUrl) {
     return null;
@@ -299,17 +305,44 @@ async function serializeTextureAsset(texture: TextureAsset): Promise<TextureAsse
   };
 }
 
+async function firstSerializableUrl(urls: Array<string | undefined>): Promise<string> {
+  for (const url of urls) {
+    const serializable = await toSerializableUrl(url || '');
+    if (serializable) {
+      return serializable;
+    }
+  }
+
+  return '';
+}
+
 async function toSerializableUrl(url: string): Promise<string> {
   if (!url || url.startsWith('data:')) {
     return url;
   }
 
-  const response = await fetch(url);
-  const blob = await response.blob();
+  if (!isBrowserLoadableUrl(url)) {
+    return '';
+  }
 
-  return new Promise(resolve => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(blob);
-  });
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return '';
+    }
+    const blob = await response.blob();
+
+    return await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return '';
+  }
+}
+
+function isBrowserLoadableUrl(url: string): boolean {
+  return /^(blob:|https?:\/\/|\/)/i.test(url);
 }
