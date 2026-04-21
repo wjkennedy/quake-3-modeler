@@ -10,6 +10,7 @@ interface TextureAsset {
   sourceName?: string;
   sourceUrl?: string;
   previewUrl?: string;
+  isPlaceholder?: boolean;
 }
 
 interface TextureBrowserProps {
@@ -22,7 +23,7 @@ interface TextureBrowserProps {
 export function TextureBrowser({ modelJson, textures, onTextureLoad, onModelUpdate }: TextureBrowserProps) {
   const model = useMemo(() => parseModel(modelJson), [modelJson]);
   const embeddedTextures = (model?.embeddedTextures || {}) as Record<string, TextureAsset>;
-  const textureList = useMemo(() => uniqueTextures({ ...embeddedTextures, ...textures }), [embeddedTextures, textures]);
+  const textureList = useMemo(() => buildTextureList(model, embeddedTextures, textures), [model, embeddedTextures, textures]);
 
   if (!model) {
     return null;
@@ -104,7 +105,12 @@ function TextureTile({
       <div className="aspect-square bg-muted overflow-hidden rounded">
         <img src={previewUrl} alt={texture.name} className="w-full h-full object-contain" />
       </div>
-      <div className="text-xs truncate" title={sourceName}>{sourceName}</div>
+      <div className="space-y-1">
+        <div className="text-xs truncate" title={sourceName}>{sourceName}</div>
+        {texture.isPlaceholder && (
+          <div className="text-[10px] text-muted-foreground">No image loaded</div>
+        )}
+      </div>
       <input
         ref={inputRef}
         type="file"
@@ -149,6 +155,58 @@ function uniqueTextures(textures: Record<string, TextureAsset>): TextureAsset[] 
     seen.add(key);
     return true;
   });
+}
+
+function buildTextureList(model: any, embeddedTextures: Record<string, TextureAsset>, textures: Record<string, TextureAsset>): TextureAsset[] {
+  const combined = { ...embeddedTextures, ...textures };
+  const list = uniqueTextures(combined);
+  const seenNames = new Set(list.flatMap(texture => getTextureKeys(texture.sourceName || texture.name)));
+
+  if (!Array.isArray(model?.meshes)) {
+    return list;
+  }
+
+  model.meshes.forEach((mesh: any) => {
+    const textureName = mesh?.material?.texturePath || mesh?.material?.name;
+    if (!textureName) {
+      return;
+    }
+
+    const keys = getTextureKeys(textureName);
+    if (keys.some(key => seenNames.has(key))) {
+      return;
+    }
+
+    const placeholder = createPlaceholderTexture(textureName);
+    list.push(placeholder);
+    keys.forEach(key => seenNames.add(key));
+  });
+
+  return list.sort((a, b) => (a.sourceName || a.name).localeCompare(b.sourceName || b.name));
+}
+
+function createPlaceholderTexture(textureName: string): TextureAsset {
+  const sourceName = textureName;
+  const label = (textureName.split('/').pop() || textureName).replace(/\.[^/.]+$/, '');
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+      <rect width="256" height="256" fill="#1f2937"/>
+      <rect x="12" y="12" width="232" height="232" fill="none" stroke="#6b7280" stroke-width="4" stroke-dasharray="10 8"/>
+      <path d="M24 200 L96 128 L144 168 L192 112 L232 152" fill="none" stroke="#9ca3af" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="88" cy="80" r="18" fill="#9ca3af"/>
+      <text x="128" y="224" fill="#e5e7eb" font-family="Arial, sans-serif" font-size="18" text-anchor="middle">${escapeXml(label)}</text>
+    </svg>
+  `.trim();
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+
+  return {
+    name: textureName,
+    sourceName,
+    type: 'image/svg+xml',
+    url,
+    previewUrl: url,
+    isPlaceholder: true,
+  };
 }
 
 async function tgaToPng(texture: TextureAsset): Promise<string> {
@@ -288,4 +346,12 @@ function getTextureKeys(value: string): string[] {
   const baseName = fileName.replace(/\.[^/.]+$/, '');
 
   return Array.from(new Set([normalized, withoutExtension, fileName, baseName].filter(Boolean)));
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

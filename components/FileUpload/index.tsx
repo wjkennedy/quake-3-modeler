@@ -30,12 +30,15 @@ export function FileUpload({ onModelLoad, onTextureLoad, onBotLoad }: FileUpload
       });
 
       const botFiles = files.filter(file => file.name.toLowerCase().endsWith('.bot'));
-      await Promise.all(botFiles.map(async file => {
-        onBotLoad?.(file.name, await file.text());
-      }));
+      const uploadedBotFiles = Object.fromEntries(await Promise.all(botFiles.map(async file => (
+        [file.name, await file.text()] as const
+      ))));
 
       const file = files.find(file => !isTextureFile(file.name) && !file.name.toLowerCase().endsWith('.bot'));
       if (!file) {
+        Object.entries(uploadedBotFiles).forEach(([name, text]) => {
+          onBotLoad?.(name, text);
+        });
         return;
       }
 
@@ -50,7 +53,7 @@ export function FileUpload({ onModelLoad, onTextureLoad, onBotLoad }: FileUpload
         // Load JSON directly
         const text = await file.text();
         const model = JSON.parse(text);
-        onModelLoad(JSON.stringify(model, null, 2));
+        onModelLoad(JSON.stringify(mergeBotFiles(model, uploadedBotFiles), null, 2));
       } else if (isPK3 || isMD3 || isMD5 || isGLTF) {
         // Send to conversion API
         const formData = new FormData();
@@ -66,7 +69,7 @@ export function FileUpload({ onModelLoad, onTextureLoad, onBotLoad }: FileUpload
         }
 
         const data = await response.json();
-        onModelLoad(JSON.stringify(data, null, 2));
+        onModelLoad(JSON.stringify(mergeBotFiles(data, uploadedBotFiles), null, 2));
       } else {
         setError('Unsupported file format. Use JSON, PK3, MD3, MD5, glTF, bot files, or image textures');
       }
@@ -102,6 +105,23 @@ export function FileUpload({ onModelLoad, onTextureLoad, onBotLoad }: FileUpload
       {error && <span className="text-destructive text-sm">{error}</span>}
     </div>
   );
+}
+
+function mergeBotFiles(model: any, botFiles: Record<string, string>): any {
+  if (!Object.keys(botFiles).length) {
+    return model;
+  }
+
+  return {
+    ...model,
+    metadata: {
+      ...(model?.metadata || {}),
+      botFiles: {
+        ...(model?.metadata?.botFiles || {}),
+        ...botFiles,
+      },
+    },
+  };
 }
 
 function isTextureFile(fileName: string): boolean {
