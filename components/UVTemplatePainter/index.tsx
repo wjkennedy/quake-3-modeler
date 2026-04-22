@@ -628,7 +628,7 @@ async function seedFromExistingTexture(
 }
 
 function findTextureAsset(textureName: string, model: any, textures: Record<string, TextureAsset>): TextureAsset | null {
-  const combined = { ...(model?.embeddedTextures || {}), ...textures };
+  const combined = { ...textures, ...(model?.embeddedTextures || {}) };
   const keys = getTextureKeys(textureName);
 
   for (const key of keys) {

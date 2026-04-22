@@ -379,39 +379,86 @@ function getTextureCandidates(value: string): string[] {
 }
 
 function loadTexture(texture: TextureAsset, onLoad: (texture: THREE.Texture) => void) {
-  const sourceUrl = getLoadableTextureUrl(texture);
-  if (!sourceUrl) {
+  const candidates = getTextureLoadCandidates(texture);
+  if (!candidates.length) {
     return;
   }
 
-  const isTga = texture.type === 'image/x-tga' || texture.name.toLowerCase().endsWith('.tga');
-  const usePreview = isTga && texture.previewUrl && isLoadableUrl(texture.previewUrl);
-  const loadUrl = usePreview ? texture.previewUrl! : sourceUrl;
-  const cached = previewTextureCache.get(loadUrl);
-  if (cached) {
-    cached.then(onLoad).catch(error => console.error('[v0] Texture load error:', error));
-    return;
-  }
-
-  const loader = isTga && !usePreview ? new TGALoader() : new THREE.TextureLoader();
-  const pending = new Promise<THREE.Texture>((resolve, reject) => {
-    loader.load(loadUrl, resolve, undefined, reject);
-  });
-
-  previewTextureCache.set(loadUrl, pending);
-  pending.then(onLoad).catch(error => {
-    previewTextureCache.delete(loadUrl);
-    console.error('[v0] Texture load error:', error);
+  loadFirstAvailableTexture(candidates).then(onLoad).catch(() => {
+    // Missing original MD3 texture paths and stale object URLs are expected while
+    // users are replacing material slots. Keep the mesh on its diffuse fallback.
   });
 }
 
-function getLoadableTextureUrl(texture: TextureAsset): string | null {
-  const candidates = [texture.sourceUrl, texture.url, texture.previewUrl];
-  return candidates.find((url): url is string => Boolean(url && isLoadableUrl(url))) || null;
+async function loadFirstAvailableTexture(candidates: TextureLoadCandidate[]): Promise<THREE.Texture> {
+  let lastError: unknown = null;
+
+  for (const candidate of candidates) {
+    try {
+      return await loadCachedTexture(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('No texture candidates loaded');
+}
+
+function loadCachedTexture(candidate: TextureLoadCandidate): Promise<THREE.Texture> {
+  const cached = previewTextureCache.get(candidate.url);
+  if (cached) {
+    return cached;
+  }
+
+  const loader = candidate.useTgaLoader ? new TGALoader() : new THREE.TextureLoader();
+  const pending = new Promise<THREE.Texture>((resolve, reject) => {
+    loader.load(candidate.url, resolve, undefined, reject);
+  }).catch(error => {
+    previewTextureCache.delete(candidate.url);
+    throw error;
+  });
+
+  previewTextureCache.set(candidate.url, pending);
+  return pending;
+}
+
+interface TextureLoadCandidate {
+  url: string;
+  useTgaLoader: boolean;
+}
+
+function getTextureLoadCandidates(texture: TextureAsset): TextureLoadCandidate[] {
+  const isTga = texture.type === 'image/x-tga' || texture.name.toLowerCase().endsWith('.tga');
+  const candidates: TextureLoadCandidate[] = [];
+
+  if (isTga && texture.previewUrl && isLoadableUrl(texture.previewUrl)) {
+    candidates.push({ url: texture.previewUrl, useTgaLoader: false });
+  }
+
+  [texture.sourceUrl, texture.url, texture.previewUrl].forEach(url => {
+    if (!url || !isLoadableUrl(url)) {
+      return;
+    }
+
+    candidates.push({ url, useTgaLoader: isTga && !isPreviewImageUrl(url) });
+  });
+
+  const seen = new Set<string>();
+  return candidates.filter(candidate => {
+    if (seen.has(candidate.url)) {
+      return false;
+    }
+    seen.add(candidate.url);
+    return true;
+  });
 }
 
 function isLoadableUrl(url: string): boolean {
   return /^(blob:|data:|https?:\/\/|\/)/i.test(url);
+}
+
+function isPreviewImageUrl(url: string): boolean {
+  return /^data:image\/(png|jpeg|jpg|webp|gif|svg\+xml)/i.test(url);
 }
 
 function computeDisplayTransform(model: any, axisSwap: AxisSwap = 'none'): DisplayTransform {
